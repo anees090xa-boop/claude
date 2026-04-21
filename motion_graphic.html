@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Motion Graphic</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a0f; display: flex; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; }
+    canvas { border-radius: 12px; box-shadow: 0 0 60px rgba(100,80,255,0.3); }
+    #controls { position: fixed; bottom: 20px; display: flex; gap: 12px; }
+    button {
+      background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2);
+      padding: 8px 20px; border-radius: 20px; cursor: pointer; font-size: 14px;
+      backdrop-filter: blur(10px); transition: background 0.2s;
+    }
+    button:hover { background: rgba(255,255,255,0.2); }
+  </style>
+</head>
+<body>
+<canvas id="c" width="1280" height="720"></canvas>
+<div id="controls">
+  <button onclick="restart()">Restart</button>
+  <button onclick="togglePause()">Pause / Play</button>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+/* ── Easing ──────────────────────────────────────────────── */
+const ease = {
+  outExpo: t => t === 1 ? 1 : 1 - Math.pow(2, -10 * t),
+  inOutCubic: t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2,
+  outBack: t => { const c1=1.70158,c3=c1+1; return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2); },
+  outElastic: t => {
+    if (t===0||t===1) return t;
+    return Math.pow(2,-10*t)*Math.sin((t*10-0.75)*(2*Math.PI)/3)+1;
+  }
+};
+
+function lerp(a,b,t){ return a+(b-a)*t; }
+function clamp(v,a,b){ return Math.min(Math.max(v,a),b); }
+function progress(t, start, end){ return clamp((t-start)/(end-start),0,1); }
+
+/* ── Scene timeline (seconds) ─────────────────────────────── */
+const DURATION = 12; // seconds
+
+let startTime = null;
+let paused = false;
+let pauseAt = 0;
+let rafId;
+
+/* ── Particles ────────────────────────────────────────────── */
+const PARTICLES = Array.from({length: 120}, () => ({
+  x: Math.random() * W,
+  y: Math.random() * H,
+  r: Math.random() * 2 + 0.5,
+  speed: Math.random() * 0.4 + 0.1,
+  angle: Math.random() * Math.PI * 2,
+  opacity: Math.random() * 0.5 + 0.1,
+}));
+
+/* ── Hexagon grid ─────────────────────────────────────────── */
+function hexPath(cx, cy, size) {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = Math.PI / 180 * (60 * i - 30);
+    const x = cx + size * Math.cos(a);
+    const y = cy + size * Math.sin(a);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+
+const HEXES = [];
+{
+  const S = 52, rows = 8, cols = 10;
+  for (let r = -1; r < rows; r++) {
+    for (let c = -1; c < cols; c++) {
+      const x = c * S * 1.73 + (r % 2) * S * 0.865 - 80;
+      const y = r * S * 1.5 - 60;
+      HEXES.push({ x, y, phase: Math.random() * Math.PI * 2 });
+    }
+  }
+}
+
+/* ── Draw helpers ─────────────────────────────────────────── */
+function drawBackground(t) {
+  const grad = ctx.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, '#07071a');
+  grad.addColorStop(1, '#0d0520');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawHexGrid(t, alpha) {
+  if (alpha <= 0) return;
+  HEXES.forEach(h => {
+    const pulse = Math.sin(t * 0.8 + h.phase) * 0.5 + 0.5;
+    ctx.save();
+    hexPath(h.x, h.y, 24);
+    ctx.strokeStyle = `rgba(120,90,255,${alpha * (0.04 + pulse * 0.06)})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  });
+}
+
+function drawParticles(t, alpha) {
+  if (alpha <= 0) return;
+  PARTICLES.forEach(p => {
+    p.x += Math.cos(p.angle) * p.speed;
+    p.y += Math.sin(p.angle) * p.speed;
+    if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+    if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(180,150,255,${alpha * p.opacity})`;
+    ctx.fill();
+  });
+}
+
+function drawOrbit(cx, cy, rx, ry, t, color, speed, alpha) {
+  const angle = t * speed;
+  const x = cx + rx * Math.cos(angle);
+  const y = cy + ry * Math.sin(angle);
+  // Trail
+  for (let i = 0; i < 30; i++) {
+    const a2 = angle - i * 0.08;
+    const tx2 = cx + rx * Math.cos(a2);
+    const ty2 = cy + ry * Math.sin(a2);
+    ctx.beginPath();
+    ctx.arc(tx2, ty2, 3 - i*0.08, 0, Math.PI*2);
+    ctx.fillStyle = color.replace('1)', `${alpha * (1 - i/30) * 0.6})`);
+    ctx.fill();
+  }
+  // Dot
+  ctx.beginPath();
+  ctx.arc(x, y, 6, 0, Math.PI*2);
+  const g = ctx.createRadialGradient(x,y,0,x,y,12);
+  g.addColorStop(0, color.replace('1)', `${alpha})`));
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fill();
+}
+
+function drawRing(cx, cy, r, lineW, color, alpha, dashOffset) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.strokeStyle = color.replace('1)', `${alpha})`);
+  ctx.lineWidth = lineW;
+  ctx.setLineDash([12, 8]);
+  ctx.lineDashOffset = dashOffset;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawGlowCircle(cx, cy, r, color, alpha) {
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  g.addColorStop(0, color.replace('1)', `${alpha * 0.9})`));
+  g.addColorStop(0.4, color.replace('1)', `${alpha * 0.4})`));
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = g;
+  ctx.fill();
+}
+
+function drawText(text, x, y, size, alpha, color='#fff', weight='700') {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `${weight} ${size}px 'Segoe UI', system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 30;
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+function drawBar(x, y, w, h, alpha, color) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  const g = ctx.createLinearGradient(x, y, x+w, y);
+  g.addColorStop(0, color);
+  g.addColorStop(1, 'rgba(100,80,255,0.2)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 4);
+  ctx.fill();
+  ctx.restore();
+}
+
+/* ── Scenes ────────────────────────────────────────────────── */
+
+// Scene 1: 0–3s  — Logo / brand reveal
+function scene1(t) {
+  const alpha = progress(t, 0, 0.5);
+  const fadeOut = 1 - progress(t, 2.5, 3);
+
+  const cx = W/2, cy = H/2;
+
+  drawHexGrid(t, alpha * fadeOut * 0.6);
+  drawParticles(t, alpha * fadeOut * 0.4);
+
+  // Glow
+  drawGlowCircle(cx, cy, 200, 'rgba(100,60,255,1)', alpha * fadeOut * 0.5);
+
+  // Rings
+  const ringA = ease.outExpo(progress(t, 0.2, 1));
+  drawRing(cx, cy, lerp(300, 160, ringA), 1.5, 'rgba(140,100,255,1)', alpha * fadeOut * 0.7, t*-60);
+  drawRing(cx, cy, lerp(280, 120, ringA), 1, 'rgba(180,140,255,1)', alpha * fadeOut * 0.4, t*80);
+
+  // Center icon — Claude "C" arc
+  const arcP = ease.outElastic(clamp(progress(t, 0.4, 1.4), 0, 1));
+  ctx.save();
+  ctx.globalAlpha = alpha * fadeOut;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 70, Math.PI*0.6, Math.PI*2.4 - (1-arcP)*Math.PI*1.8);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 8;
+  ctx.lineCap = 'round';
+  ctx.shadowColor = '#a080ff';
+  ctx.shadowBlur = 30;
+  ctx.stroke();
+  ctx.restore();
+
+  // Title
+  const titleP = ease.outExpo(progress(t, 0.8, 1.6));
+  drawText('CLAUDE', cx, cy + 130, 72, titleP * alpha * fadeOut, '#ffffff');
+  const subtP = ease.outExpo(progress(t, 1.2, 2));
+  drawText('AI  ·  MOTION  GRAPHIC', cx, cy + 185, 18, subtP * alpha * fadeOut, 'rgba(160,130,255,1)', '400');
+}
+
+// Scene 2: 3–7s — Data / orbit animation
+function scene2(t) {
+  const lt = t - 3;
+  const alpha = ease.outExpo(progress(lt, 0, 0.6));
+  const fadeOut = 1 - progress(lt, 3.5, 4);
+
+  const cx = W/2, cy = H/2;
+
+  drawHexGrid(t, alpha * fadeOut * 0.5);
+  drawParticles(t, alpha * fadeOut * 0.3);
+
+  // Central glow
+  drawGlowCircle(cx, cy, 160, 'rgba(80,50,220,1)', alpha * fadeOut * 0.6);
+
+  // Orbits
+  drawRing(cx, cy, 200, 1, 'rgba(120,90,255,1)', alpha * fadeOut * 0.4, t*50);
+  drawRing(cx, cy, 270, 1, 'rgba(100,200,255,1)', alpha * fadeOut * 0.3, t*-40);
+
+  drawOrbit(cx, cy, 200, 200, lt, 'rgba(180,130,255,1)', 0.9, alpha * fadeOut);
+  drawOrbit(cx, cy, 200, 200, lt + Math.PI*0.66, 'rgba(100,200,255,1)', 0.9, alpha * fadeOut);
+  drawOrbit(cx, cy, 200, 200, lt + Math.PI*1.33, 'rgba(255,180,100,1)', 0.9, alpha * fadeOut);
+
+  drawOrbit(cx, cy, 270, 130, lt, 'rgba(255,120,180,1)', -0.6, alpha * fadeOut);
+  drawOrbit(cx, cy, 270, 130, lt + Math.PI, 'rgba(120,255,200,1)', -0.6, alpha * fadeOut);
+
+  // Center text
+  const lp = ease.outExpo(progress(lt, 0.3, 1));
+  drawText('INTELLIGENCE', cx, cy - 14, 38, lp * alpha * fadeOut);
+  drawText('IN MOTION', cx, cy + 36, 38, lp * alpha * fadeOut, 'rgba(160,130,255,1)');
+
+  // Stats bars
+  const labels = ['Processing', 'Learning', 'Creating', 'Adapting'];
+  const vals   = [0.88, 0.94, 0.76, 0.91];
+  labels.forEach((label, i) => {
+    const bx = 80, by = H - 200 + i * 42;
+    const bp = ease.outExpo(progress(lt, 0.5 + i*0.15, 1.5 + i*0.15));
+    const bw = 280 * vals[i] * bp * alpha * fadeOut;
+    drawBar(bx, by, bw, 22, alpha * fadeOut, 'rgba(120,90,255,0.8)');
+    drawText(label, bx - 10, by + 11, 13, alpha * fadeOut * 0.8, '#c0a0ff', '400');
+    ctx.save();
+    ctx.globalAlpha = alpha * fadeOut * bp;
+    ctx.font = '600 13px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`${Math.round(vals[i]*100)}%`, bx + bw + 8, by + 13);
+    ctx.restore();
+  });
+}
+
+// Scene 3: 7–10s — Feature highlights
+function scene3(t) {
+  const lt = t - 7;
+  const alpha = ease.outExpo(progress(lt, 0, 0.6));
+  const fadeOut = 1 - progress(lt, 2.6, 3);
+
+  drawHexGrid(t, alpha * fadeOut * 0.4);
+  drawParticles(t, alpha * fadeOut * 0.3);
+
+  const features = [
+    { icon: '⚡', label: 'Fast',      sub: 'Real-time responses',   col: '#9060ff' },
+    { icon: '🔒', label: 'Safe',      sub: 'Built with care',        col: '#6090ff' },
+    { icon: '🧠', label: 'Smart',     sub: 'Deep reasoning',         col: '#60c0ff' },
+    { icon: '✨', label: 'Creative',  sub: 'Limitless ideas',        col: '#c060ff' },
+  ];
+
+  const cols = 4;
+  const cardW = 220, cardH = 200, gap = 30;
+  const totalW = cols * cardW + (cols-1) * gap;
+  const startX = (W - totalW) / 2;
+  const startY = H/2 - cardH/2;
+
+  features.forEach((f, i) => {
+    const delay = i * 0.18;
+    const fp = ease.outBack(clamp(progress(lt, 0.2 + delay, 1 + delay), 0, 1));
+    const cx2 = startX + i * (cardW + gap);
+
+    ctx.save();
+    ctx.globalAlpha = fp * alpha * fadeOut;
+
+    // Card bg
+    const g = ctx.createLinearGradient(cx2, startY, cx2, startY + cardH);
+    g.addColorStop(0, `${f.col}22`);
+    g.addColorStop(1, `${f.col}08`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.roundRect(cx2, startY, cardW, cardH, 16);
+    ctx.fill();
+    ctx.strokeStyle = `${f.col}55`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Icon
+    ctx.font = '52px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(f.icon, cx2 + cardW/2, startY + 65);
+
+    ctx.restore();
+
+    drawText(f.label, cx2 + cardW/2, startY + 120, 26, fp * alpha * fadeOut, f.col);
+    drawText(f.sub,   cx2 + cardW/2, startY + 155, 14, fp * alpha * fadeOut * 0.7, '#aaa', '400');
+  });
+
+  // Heading
+  const hp = ease.outExpo(progress(lt, 0, 0.5));
+  drawText('WHY CLAUDE?', W/2, startY - 60, 44, hp * alpha * fadeOut);
+}
+
+// Scene 4: 10–12s — Outro
+function scene4(t) {
+  const lt = t - 10;
+  const alpha = ease.outExpo(progress(lt, 0, 0.8));
+
+  const cx = W/2, cy = H/2;
+
+  drawHexGrid(t, alpha * 0.7);
+  drawParticles(t, alpha * 0.5);
+
+  // Expanding rings
+  for (let i = 0; i < 4; i++) {
+    const rp = (lt * 0.3 + i * 0.25) % 1;
+    const r = rp * 400;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI*2);
+    ctx.strokeStyle = `rgba(120,90,255,${(1-rp)*0.25*alpha})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  drawGlowCircle(cx, cy, 200, 'rgba(100,60,255,1)', alpha * 0.6);
+
+  // Outro text
+  const tp = ease.outElastic(clamp(progress(lt, 0.2, 1.2), 0, 1));
+  drawText('CLAUDE', cx, cy - 20, 88, tp * alpha, '#fff');
+  const sp = ease.outExpo(progress(lt, 0.8, 1.8));
+  drawText('anthropic.com', cx, cy + 60, 22, sp * alpha, 'rgba(180,150,255,1)', '400');
+
+  // Fade to black at very end
+  const fb = progress(lt, 1.4, 2);
+  if (fb > 0) {
+    ctx.fillStyle = `rgba(0,0,0,${fb})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+/* ── Main render loop ─────────────────────────────────────── */
+function render(ts) {
+  if (!startTime) startTime = ts;
+  const elapsed = paused ? pauseAt : (ts - startTime) / 1000;
+
+  ctx.clearRect(0, 0, W, H);
+  drawBackground(elapsed);
+
+  if (elapsed < 3)       scene1(elapsed);
+  else if (elapsed < 7)  scene2(elapsed);
+  else if (elapsed < 10) scene3(elapsed);
+  else                   scene4(elapsed);
+
+  if (!paused && elapsed < DURATION + 0.5) {
+    rafId = requestAnimationFrame(render);
+  } else if (!paused && elapsed >= DURATION + 0.5) {
+    // Loop
+    startTime = ts;
+    rafId = requestAnimationFrame(render);
+  }
+}
+
+function restart() {
+  cancelAnimationFrame(rafId);
+  startTime = null;
+  paused = false;
+  rafId = requestAnimationFrame(render);
+}
+
+function togglePause() {
+  paused = !paused;
+  if (!paused) {
+    startTime = performance.now() - pauseAt * 1000;
+    rafId = requestAnimationFrame(render);
+  }
+}
+
+// Capture current time for pause
+requestAnimationFrame(function patchPause(ts) {
+  if (!startTime) startTime = ts;
+  pauseAt = (ts - startTime) / 1000;
+  if (!paused) requestAnimationFrame(patchPause);
+});
+
+rafId = requestAnimationFrame(render);
+</script>
+</body>
+</html>
