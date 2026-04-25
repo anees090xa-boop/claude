@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MedFight AI — Fight Your Medical Bills</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="logo">⚕️ MedFight <span>AI</span></div>
+    <p class="tagline">The hospital has billing experts. Now you have AI.</p>
+  </header>
+
+  <main>
+
+    <!-- Hero Stats -->
+    <section class="stats">
+      <div class="stat"><strong>80%</strong><span>of medical bills contain errors</span></div>
+      <div class="stat"><strong>41%</strong><span>of insurance appeals win</span></div>
+      <div class="stat"><strong>$1,300</strong><span>average savings per case</span></div>
+    </section>
+
+    <!-- Mode Selector -->
+    <section class="mode-selector">
+      <button class="mode-btn active" data-mode="bill">🧾 Analyze Medical Bill</button>
+      <button class="mode-btn" data-mode="denial">📋 Fight Insurance Denial</button>
+    </section>
+
+    <!-- Upload Section -->
+    <section class="upload-section">
+      <div class="upload-box" id="uploadBox">
+        <div class="upload-icon">📄</div>
+        <p>Drop your bill here or <label for="fileInput" class="file-label">browse file</label></p>
+        <p class="upload-hint">Supports PDF, TXT — or paste text below</p>
+        <input type="file" id="fileInput" accept=".pdf,.txt" hidden />
+      </div>
+
+      <div class="divider"><span>or paste text directly</span></div>
+
+      <textarea id="billText" placeholder="Paste your medical bill or insurance denial letter here..."></textarea>
+
+      <button class="analyze-btn" id="analyzeBtn">
+        <span id="btnText">⚡ Analyze & Fight</span>
+        <span id="btnLoader" hidden>Analyzing... this takes ~15 seconds</span>
+      </button>
+    </section>
+
+    <!-- Results Section -->
+    <section class="results" id="results" hidden>
+
+      <div class="result-header">
+        <div class="severity-badge" id="severityBadge"></div>
+        <h2 id="resultTitle"></h2>
+        <p id="resultSummary"></p>
+      </div>
+
+      <div class="savings-box" id="savingsBox" hidden>
+        <p>Potential Savings Found</p>
+        <strong id="savingsAmount"></strong>
+      </div>
+
+      <!-- Bill Results -->
+      <div id="billResults" hidden>
+        <div class="result-card" id="errorsCard" hidden>
+          <h3>🔴 Billing Errors Found</h3>
+          <div id="errorsList"></div>
+        </div>
+
+        <div class="result-card" id="overchargesCard" hidden>
+          <h3>🟠 Overcharges Detected</h3>
+          <div id="overchargesList"></div>
+        </div>
+
+        <div class="result-card">
+          <h3>📋 Next Steps</h3>
+          <ol id="nextStepsList"></ol>
+        </div>
+
+        <div class="result-card appeal-card">
+          <div class="appeal-header">
+            <h3>✉️ Your Appeal Letter</h3>
+            <button class="copy-btn" id="copyBillLetter">Copy Letter</button>
+          </div>
+          <pre id="billAppealLetter"></pre>
+        </div>
+      </div>
+
+      <!-- Denial Results -->
+      <div id="denialResults" hidden>
+        <div class="result-card">
+          <h3>📌 Why They Denied It</h3>
+          <p id="denialReason"></p>
+        </div>
+
+        <div class="win-box" id="winBox">
+          <div>
+            <p>Win Probability</p>
+            <strong id="winProbability"></strong>
+          </div>
+          <div>
+            <p>Wrongful Denial?</p>
+            <strong id="wrongfulDenial"></strong>
+          </div>
+          <div>
+            <p>Confidence</p>
+            <strong id="wrongfulConfidence"></strong>
+          </div>
+        </div>
+
+        <div class="result-card">
+          <h3>💪 Your Strongest Arguments</h3>
+          <ul id="appealArguments"></ul>
+        </div>
+
+        <div class="result-card">
+          <h3>🪜 If Appeal Fails — Escalation Path</h3>
+          <ol id="escalationSteps"></ol>
+        </div>
+
+        <div class="result-card appeal-card">
+          <div class="appeal-header">
+            <h3>✉️ Your Appeal Letter</h3>
+            <button class="copy-btn" id="copyDenialLetter">Copy Letter</button>
+          </div>
+          <pre id="denialAppealLetter"></pre>
+        </div>
+      </div>
+
+      <button class="reset-btn" id="resetBtn">← Analyze Another Bill</button>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>MedFight AI — Built to fight for patients, not hospitals.</p>
+    <p class="disclaimer">This tool provides informational assistance only, not legal or medical advice.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
